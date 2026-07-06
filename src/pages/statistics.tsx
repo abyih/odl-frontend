@@ -206,7 +206,7 @@ export default function StatisticsPage() {
         {selectedNodeId && (
           <Badge variant="outline" className="gap-1 mb-0.5">
             <Server className="h-3 w-3" />
-            {selectedNode?.['node-connector']?.length || 0} ports
+            {(selectedNode?.['node-connector'] || selectedNode?.['opendaylight-inventory:node-connector'])?.length || 0} ports
           </Badge>
         )}
       </div>

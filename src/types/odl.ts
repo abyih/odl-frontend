@@ -17,12 +17,17 @@ export interface TopologyNode {
   "termination-point"?: Array<{
     "tp-id": string;
   }>;
+  "network-topology:termination-point"?: Array<{
+    "tp-id": string;
+  }>;
 }
 
 export interface Topology {
   "topology-id": string;
   node?: TopologyNode[];
+  "network-topology:node"?: TopologyNode[];
   link?: TopologyLink[];
+  "network-topology:link"?: TopologyLink[];
 }
 
 export interface TopologyResponse {
@@ -77,6 +82,7 @@ export interface FlowCapableNodeInfo {
 export interface InventoryNode {
   id: string;
   "node-connector"?: NodeConnector[];
+  "opendaylight-inventory:node-connector"?: NodeConnector[];
   "flow-node-inventory:manufacturer"?: string;
   "flow-node-inventory:hardware"?: string;
   "flow-node-inventory:software"?: string;
@@ -84,6 +90,7 @@ export interface InventoryNode {
   "flow-node-inventory:description"?: string;
   "flow-node-inventory:ip-address"?: string;
   "flow-node-inventory:table"?: FlowTable[];
+  table?: FlowTable[];
 }
 
 export interface NodesResponse {
@@ -167,6 +174,7 @@ export interface Flow {
 export interface FlowTable {
   id: number;
   flow?: Flow[];
+  "flow-node-inventory:flow"?: Flow[];
   "opendaylight-flow-table-statistics:flow-table-statistics"?: {
     "active-flows": number;
     "packets-looked-up": number;

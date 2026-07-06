@@ -283,13 +283,13 @@ export default function DashboardPage() {
                     <TableCell>{node['flow-node-inventory:software'] || '—'}</TableCell>
                     <TableCell>
                       <Badge variant="secondary">
-                        {node['node-connector']?.length || 0}
+                        {(node['node-connector'] || node['opendaylight-inventory:node-connector'])?.length || 0}
                       </Badge>
                     </TableCell>
                     <TableCell>
                       <Badge variant="outline">
                         <Layers className="mr-1 h-3 w-3" />
-                        {node['flow-node-inventory:table']?.length || 0}
+                        {(node['flow-node-inventory:table'] || node.table)?.length || 0}
                       </Badge>
                     </TableCell>
                     <TableCell>
