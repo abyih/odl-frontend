@@ -197,7 +197,7 @@ export default function TopologyPage() {
 
       {/* Node detail sheet */}
       <Sheet open={!!selectedNodeId} onOpenChange={() => setSelectedNodeId(null)}>
-        <SheetContent className="sm:max-w-lg overflow-y-auto">
+        <SheetContent className="sm:max-w-lg overflow-y-auto p-6">
           <SheetHeader>
             <SheetTitle className="font-mono">{selectedNodeId}</SheetTitle>
             <SheetDescription>Node details and port information</SheetDescription>

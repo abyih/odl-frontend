@@ -5,8 +5,6 @@ interface GraphNode {
   id: string;
   x: number;
   y: number;
-  vx: number;
-  vy: number;
   ports: number;
   label: string;
 }
@@ -29,10 +27,9 @@ export function TopologyGraph({ topology, width = 800, height = 500, onNodeClick
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const nodesRef = useRef<GraphNode[]>([]);
   const linksRef = useRef<GraphLink[]>([]);
-  const animFrameRef = useRef<number>(0);
-  const dragNodeRef = useRef<GraphNode | null>(null);
   const hoveredNodeRef = useRef<GraphNode | null>(null);
-  const mouseRef = useRef({ x: 0, y: 0 });
+  const needsRedrawRef = useRef(true);
+  const rafRef = useRef<number>(0);
 
   const parseTopology = useCallback((topo: Topology | null) => {
     if (!topo) return { nodes: [] as GraphNode[], links: [] as GraphLink[] };
@@ -40,21 +37,18 @@ export function TopologyGraph({ topology, width = 800, height = 500, onNodeClick
     const topoNodes: TopologyNode[] = topo.node || topo['network-topology:node'] || [];
     const topoLinks: TopologyLink[] = topo.link || topo['network-topology:link'] || [];
 
-    // Only include switch nodes (openflow:X), not host nodes
     const switchNodes = topoNodes.filter(n => n['node-id'].startsWith('openflow:'));
 
     const nodes: GraphNode[] = switchNodes.map((n, i) => {
       const existing = nodesRef.current.find(en => en.id === n['node-id']);
-      const angle = (2 * Math.PI * i) / Math.max(switchNodes.length, 1);
+      const angle = (2 * Math.PI * i) / Math.max(switchNodes.length, 1) - Math.PI / 2;
       const radius = Math.min(width, height) * 0.3;
       return {
         id: n['node-id'],
         x: existing?.x ?? width / 2 + radius * Math.cos(angle),
         y: existing?.y ?? height / 2 + radius * Math.sin(angle),
-        vx: 0,
-        vy: 0,
-        ports: n['termination-point']?.length || 0,
-        label: n['node-id'].replace('openflow:', 'SW '),
+        ports: n['termination-point']?.length || n['network-topology:termination-point']?.length || 0,
+        label: n['node-id'].replace('openflow:', 's'),
       };
     });
 
@@ -75,8 +69,185 @@ export function TopologyGraph({ topology, width = 800, height = 500, onNodeClick
     const { nodes, links } = parseTopology(topology);
     nodesRef.current = nodes;
     linksRef.current = links;
+    needsRedrawRef.current = true;
   }, [topology, parseTopology]);
 
+  const draw = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const nodes = nodesRef.current;
+    const links = linksRef.current;
+
+    ctx.clearRect(0, 0, width, height);
+
+    const isDark = document.documentElement.classList.contains('dark');
+    const colors = isDark
+      ? {
+          dotGrid: 'rgba(148,163,184,0.06)',
+          linkStroke: 'rgba(100,116,139,0.35)',
+          linkLabel: 'rgba(148,163,184,0.5)',
+          nodeFill: '#1e293b',
+          nodeStroke: '#334155',
+          nodeHoverFill: '#1e3a5f',
+          nodeHoverStroke: '#3b82f6',
+          nodeIcon: '#94a3b8',
+          nodeIconHover: '#60a5fa',
+          label: '#cbd5e1',
+          labelHover: '#f1f5f9',
+          portDotActive: '#22c55e',
+          emptyText: 'rgba(148,163,184,0.4)',
+          emptySubtext: 'rgba(148,163,184,0.25)',
+        }
+      : {
+          dotGrid: 'rgba(0,0,0,0.04)',
+          linkStroke: 'rgba(148,163,184,0.45)',
+          linkLabel: 'rgba(100,116,139,0.4)',
+          nodeFill: '#ffffff',
+          nodeStroke: '#d1d5db',
+          nodeHoverFill: '#eff6ff',
+          nodeHoverStroke: '#3b82f6',
+          nodeIcon: '#6b7280',
+          nodeIconHover: '#3b82f6',
+          label: '#374151',
+          labelHover: '#111827',
+          portDotActive: '#22c55e',
+          emptyText: 'rgba(100,116,139,0.45)',
+          emptySubtext: 'rgba(100,116,139,0.3)',
+        };
+
+    // Dot grid
+    ctx.fillStyle = colors.dotGrid;
+    const spacing = 24;
+    for (let x = spacing; x < width; x += spacing) {
+      for (let y = spacing; y < height; y += spacing) {
+        ctx.beginPath();
+        ctx.arc(x, y, 0.6, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // Links
+    for (const link of links) {
+      const a = nodes.find(n => n.id === link.source);
+      const b = nodes.find(n => n.id === link.target);
+      if (!a || !b) continue;
+
+      ctx.strokeStyle = colors.linkStroke;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+
+      // Port labels on each end of the link
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist > 80) {
+        const nx = dx / dist;
+        const ny = dy / dist;
+        const offset = 28;
+
+        ctx.font = '9px Inter Variable, system-ui, sans-serif';
+        ctx.fillStyle = colors.linkLabel;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        const srcPort = link.sourcePort.split(':').pop() || '';
+        ctx.fillText(srcPort, a.x + nx * offset, a.y + ny * offset);
+
+        const tgtPort = link.targetPort.split(':').pop() || '';
+        ctx.fillText(tgtPort, b.x - nx * offset, b.y - ny * offset);
+      }
+    }
+
+    // Nodes — rounded rectangles
+    const nodeW = 52;
+    const nodeH = 40;
+    const nodeR = 6;
+
+    for (const node of nodes) {
+      const isHovered = hoveredNodeRef.current?.id === node.id;
+      const x = node.x - nodeW / 2;
+      const y = node.y - nodeH / 2;
+
+      if (isHovered) {
+        ctx.shadowColor = isDark ? 'rgba(59,130,246,0.2)' : 'rgba(59,130,246,0.15)';
+        ctx.shadowBlur = 12;
+        ctx.shadowOffsetY = 2;
+      }
+
+      ctx.fillStyle = isHovered ? colors.nodeHoverFill : colors.nodeFill;
+      ctx.strokeStyle = isHovered ? colors.nodeHoverStroke : colors.nodeStroke;
+      ctx.lineWidth = isHovered ? 1.5 : 1;
+      ctx.beginPath();
+      ctx.roundRect(x, y, nodeW, nodeH, nodeR);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.shadowColor = 'transparent';
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetY = 0;
+
+      // Switch icon
+      const iconColor = isHovered ? colors.nodeIconHover : colors.nodeIcon;
+      ctx.strokeStyle = iconColor;
+      ctx.fillStyle = iconColor;
+      ctx.lineWidth = 1.2;
+
+      const bx = node.x - 7;
+      const by = node.y - 6;
+      const bw = 14;
+      const bh = 8;
+      ctx.strokeRect(bx, by, bw, bh);
+
+      const portPositions = [bx + 2, bx + 5, bx + 9, bx + 12];
+      for (const px of portPositions) {
+        ctx.beginPath();
+        ctx.moveTo(px, by + bh);
+        ctx.lineTo(px, by + bh + 3);
+        ctx.stroke();
+      }
+
+      // Status dot
+      ctx.fillStyle = colors.portDotActive;
+      ctx.beginPath();
+      ctx.arc(node.x + nodeW / 2 - 8, node.y - nodeH / 2 + 7, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Label
+      ctx.fillStyle = isHovered ? colors.labelHover : colors.label;
+      ctx.font = `500 ${isHovered ? '11px' : '10px'} Inter Variable, system-ui, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText(node.label, node.x, node.y + nodeH / 2 + 6);
+
+      // Port count
+      ctx.fillStyle = colors.linkLabel;
+      ctx.font = '9px Inter Variable, system-ui, sans-serif';
+      ctx.fillText(`${node.ports} ports`, node.x, node.y + nodeH / 2 + 19);
+    }
+
+    // Empty state
+    if (nodes.length === 0) {
+      ctx.textBaseline = 'middle';
+      ctx.textAlign = 'center';
+
+      ctx.fillStyle = colors.emptyText;
+      ctx.font = '500 13px Inter Variable, system-ui, sans-serif';
+      ctx.fillText('No topology data', width / 2, height / 2 - 8);
+
+      ctx.fillStyle = colors.emptySubtext;
+      ctx.font = '12px Inter Variable, system-ui, sans-serif';
+      ctx.fillText('Connect OpenFlow switches to populate', width / 2, height / 2 + 12);
+    }
+  }, [width, height]);
+
+  // Redraw loop — only repaints when flagged
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -88,182 +259,32 @@ export function TopologyGraph({ topology, width = 800, height = 500, onNodeClick
     canvas.height = height * dpr;
     ctx.scale(dpr, dpr);
 
-    const simulate = () => {
-      const nodes = nodesRef.current;
-      const links = linksRef.current;
-
-      // Simple force simulation
-      for (let i = 0; i < nodes.length; i++) {
-        for (let j = i + 1; j < nodes.length; j++) {
-          const dx = nodes[j].x - nodes[i].x;
-          const dy = nodes[j].y - nodes[i].y;
-          const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-          const force = 2000 / (dist * dist);
-          const fx = (dx / dist) * force;
-          const fy = (dy / dist) * force;
-          nodes[i].vx -= fx;
-          nodes[i].vy -= fy;
-          nodes[j].vx += fx;
-          nodes[j].vy += fy;
-        }
+    const loop = () => {
+      if (needsRedrawRef.current) {
+        draw();
+        needsRedrawRef.current = false;
       }
-
-      // Spring force for links
-      for (const link of links) {
-        const a = nodes.find(n => n.id === link.source);
-        const b = nodes.find(n => n.id === link.target);
-        if (!a || !b) continue;
-        const dx = b.x - a.x;
-        const dy = b.y - a.y;
-        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-        const force = (dist - 150) * 0.02;
-        const fx = (dx / dist) * force;
-        const fy = (dy / dist) * force;
-        a.vx += fx;
-        a.vy += fy;
-        b.vx -= fx;
-        b.vy -= fy;
-      }
-
-      // Center gravity
-      for (const node of nodes) {
-        node.vx += (width / 2 - node.x) * 0.001;
-        node.vy += (height / 2 - node.y) * 0.001;
-
-        if (node !== dragNodeRef.current) {
-          node.vx *= 0.9;
-          node.vy *= 0.9;
-          node.x += node.vx;
-          node.y += node.vy;
-          // Boundary
-          node.x = Math.max(30, Math.min(width - 30, node.x));
-          node.y = Math.max(30, Math.min(height - 30, node.y));
-        }
-      }
+      rafRef.current = requestAnimationFrame(loop);
     };
 
-    const draw = () => {
-      simulate();
-      const nodes = nodesRef.current;
-      const links = linksRef.current;
+    needsRedrawRef.current = true;
+    loop();
 
-      ctx.clearRect(0, 0, width, height);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [width, height, draw]);
 
-      // Draw grid
-      const isDark = document.documentElement.classList.contains('dark');
-      ctx.strokeStyle = isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.04)';
-      ctx.lineWidth = 1;
-      for (let x = 0; x < width; x += 40) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, height);
-        ctx.stroke();
-      }
-      for (let y = 0; y < height; y += 40) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(width, y);
-        ctx.stroke();
-      }
+  // Mouse interactions — flag redraw on hover/drag changes
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
 
-      // Draw links
-      for (const link of links) {
-        const a = nodes.find(n => n.id === link.source);
-        const b = nodes.find(n => n.id === link.target);
-        if (!a || !b) continue;
-
-        const gradient = ctx.createLinearGradient(a.x, a.y, b.x, b.y);
-        gradient.addColorStop(0, isDark ? 'rgba(99,141,255,0.6)' : 'rgba(59,130,246,0.5)');
-        gradient.addColorStop(1, isDark ? 'rgba(139,92,246,0.6)' : 'rgba(139,92,246,0.5)');
-
-        ctx.strokeStyle = gradient;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(a.x, a.y);
-        ctx.lineTo(b.x, b.y);
-        ctx.stroke();
-
-        // Animated dot along link
-        const t = (Date.now() % 3000) / 3000;
-        const dotX = a.x + (b.x - a.x) * t;
-        const dotY = a.y + (b.y - a.y) * t;
-        ctx.fillStyle = isDark ? 'rgba(99,141,255,0.8)' : 'rgba(59,130,246,0.7)';
-        ctx.beginPath();
-        ctx.arc(dotX, dotY, 2.5, 0, Math.PI * 2);
-        ctx.fill();
-      }
-
-      // Draw nodes
-      for (const node of nodes) {
-        const isHovered = hoveredNodeRef.current?.id === node.id;
-        const nodeRadius = isHovered ? 24 : 20;
-
-        // Glow
-        if (isHovered) {
-          ctx.shadowColor = isDark ? 'rgba(99,141,255,0.5)' : 'rgba(59,130,246,0.4)';
-          ctx.shadowBlur = 15;
-        }
-
-        // Node body
-        ctx.fillStyle = isDark
-          ? (isHovered ? 'rgba(99,141,255,0.3)' : 'rgba(30,41,59,0.9)')
-          : (isHovered ? 'rgba(219,234,254,1)' : 'rgba(255,255,255,0.95)');
-        ctx.strokeStyle = isDark
-          ? (isHovered ? 'rgba(99,141,255,0.8)' : 'rgba(71,85,105,0.6)')
-          : (isHovered ? 'rgba(59,130,246,0.7)' : 'rgba(203,213,225,0.8)');
-        ctx.lineWidth = isHovered ? 2.5 : 1.5;
-
-        ctx.beginPath();
-        ctx.arc(node.x, node.y, nodeRadius, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-
-        ctx.shadowColor = 'transparent';
-        ctx.shadowBlur = 0;
-
-        // Switch icon (simplified)
-        ctx.strokeStyle = isDark ? 'rgba(148,163,184,0.8)' : 'rgba(71,85,105,0.7)';
-        ctx.lineWidth = 1.5;
-        const s = nodeRadius * 0.4;
-        // Box shape
-        ctx.strokeRect(node.x - s, node.y - s * 0.6, s * 2, s * 1.2);
-        // Ports
-        for (let p = 0; p < 3; p++) {
-          const px = node.x - s + s * 0.5 + p * s * 0.5;
-          ctx.fillStyle = isDark ? 'rgba(52,211,153,0.7)' : 'rgba(16,185,129,0.7)';
-          ctx.beginPath();
-          ctx.arc(px, node.y, 2, 0, Math.PI * 2);
-          ctx.fill();
-        }
-
-        // Label
-        ctx.fillStyle = isDark ? 'rgba(226,232,240,0.9)' : 'rgba(30,41,59,0.9)';
-        ctx.font = `${isHovered ? '11' : '10'}px Inter Variable, sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.fillText(node.label, node.x, node.y + nodeRadius + 14);
-      }
-
-      // Empty state
-      if (nodes.length === 0) {
-        ctx.fillStyle = isDark ? 'rgba(148,163,184,0.5)' : 'rgba(100,116,139,0.5)';
-        ctx.font = '14px Inter Variable, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('No topology data available', width / 2, height / 2 - 10);
-        ctx.font = '12px Inter Variable, sans-serif';
-        ctx.fillText('Connect to ODL controller to view network topology', width / 2, height / 2 + 10);
-      }
-
-      animFrameRef.current = requestAnimationFrame(draw);
-    };
-
-    draw();
-
-    // Mouse events
-    const getNodeAtPos = (x: number, y: number): GraphNode | null => {
+    const getNodeAtPos = (mx: number, my: number): GraphNode | null => {
+      const halfW = 26;
+      const halfH = 20;
       for (const node of nodesRef.current) {
-        const dx = node.x - x;
-        const dy = node.y - y;
-        if (dx * dx + dy * dy < 25 * 25) return node;
+        if (Math.abs(node.x - mx) < halfW + 4 && Math.abs(node.y - my) < halfH + 4) {
+          return node;
+        }
       }
       return null;
     };
@@ -273,36 +294,14 @@ export function TopologyGraph({ topology, width = 800, height = 500, onNodeClick
       return { x: e.clientX - rect.left, y: e.clientY - rect.top };
     };
 
-    const handleMouseDown = (e: MouseEvent) => {
-      const pos = getMousePos(e);
-      const node = getNodeAtPos(pos.x, pos.y);
-      if (node) {
-        dragNodeRef.current = node;
-        canvas.style.cursor = 'grabbing';
-      }
-    };
-
     const handleMouseMove = (e: MouseEvent) => {
       const pos = getMousePos(e);
-      mouseRef.current = pos;
-
-      if (dragNodeRef.current) {
-        dragNodeRef.current.x = pos.x;
-        dragNodeRef.current.y = pos.y;
-        dragNodeRef.current.vx = 0;
-        dragNodeRef.current.vy = 0;
-      } else {
-        const node = getNodeAtPos(pos.x, pos.y);
+      const node = getNodeAtPos(pos.x, pos.y);
+      if (node !== hoveredNodeRef.current) {
         hoveredNodeRef.current = node;
-        canvas.style.cursor = node ? 'grab' : 'default';
+        needsRedrawRef.current = true;
       }
-    };
-
-    const handleMouseUp = () => {
-      if (dragNodeRef.current) {
-        canvas.style.cursor = 'grab';
-        dragNodeRef.current = null;
-      }
+      canvas.style.cursor = node ? 'pointer' : 'default';
     };
 
     const handleClick = (e: MouseEvent) => {
@@ -313,19 +312,14 @@ export function TopologyGraph({ topology, width = 800, height = 500, onNodeClick
       }
     };
 
-    canvas.addEventListener('mousedown', handleMouseDown);
     canvas.addEventListener('mousemove', handleMouseMove);
-    canvas.addEventListener('mouseup', handleMouseUp);
     canvas.addEventListener('click', handleClick);
 
     return () => {
-      cancelAnimationFrame(animFrameRef.current);
-      canvas.removeEventListener('mousedown', handleMouseDown);
       canvas.removeEventListener('mousemove', handleMouseMove);
-      canvas.removeEventListener('mouseup', handleMouseUp);
       canvas.removeEventListener('click', handleClick);
     };
-  }, [width, height, onNodeClick]);
+  }, [onNodeClick]);
 
   return (
     <canvas
