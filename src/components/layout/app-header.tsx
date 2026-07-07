@@ -23,6 +23,8 @@ const pageTitles: Record<string, string> = {
   '/flows': 'Flow Management',
   '/statistics': 'Statistics & Analytics',
   '/settings': 'Settings',
+  '/anomalies': 'Anomalies & Alert Center',
+  '/ddos': 'DDoS Threat Analysis',
 };
 
 export function AppHeader() {

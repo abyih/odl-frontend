@@ -8,6 +8,8 @@ import NodesPage from '@/pages/nodes';
 import FlowsPage from '@/pages/flows';
 import StatisticsPage from '@/pages/statistics';
 import SettingsPage from '@/pages/settings';
+import AnomaliesPage from '@/pages/anomalies';
+import DdosPage from '@/pages/ddos';
 
 function App() {
   const themeState = useTheme();
@@ -21,6 +23,8 @@ function App() {
           <Route path="/nodes" element={<NodesPage />} />
           <Route path="/flows" element={<FlowsPage />} />
           <Route path="/statistics" element={<StatisticsPage />} />
+          <Route path="/anomalies" element={<AnomaliesPage />} />
+          <Route path="/ddos" element={<DdosPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Route>
       </Routes>

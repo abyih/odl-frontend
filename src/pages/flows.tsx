@@ -86,7 +86,8 @@ export default function FlowsPage() {
     }
   };
 
-  const formatMatch = (match: Flow['match']): string => {
+  const formatMatch = (match: Flow['match'] | undefined): string => {
+    if (!match) return 'any';
     const parts: string[] = [];
     if (match['in-port']) parts.push(`in_port=${match['in-port'].split(':').pop()}`);
     if (match['ethernet-match']?.['ethernet-type']) parts.push(`eth_type=${match['ethernet-match']['ethernet-type'].type}`);
@@ -97,7 +98,7 @@ export default function FlowsPage() {
   };
 
   const formatActions = (flow: Flow): string => {
-    const instructions = flow.instructions?.instruction || [];
+    const instructions = flow?.instructions?.instruction || [];
     const parts: string[] = [];
     for (const inst of instructions) {
       const actions = inst['apply-actions']?.action || inst['write-actions']?.action || [];

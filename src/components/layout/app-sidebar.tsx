@@ -6,6 +6,8 @@ import {
   GitBranch,
   BarChart3,
   Settings,
+  ShieldAlert,
+  Flame,
 } from 'lucide-react';
 import {
   Sidebar,
@@ -22,17 +24,45 @@ import {
 } from '@/components/ui/sidebar';
 import { ConnectionStatus } from '@/components/connection-status';
 
-const navItems = [
+const managementItems = [
   { title: 'Dashboard', url: '/', icon: LayoutDashboard },
   { title: 'Topology', url: '/topology', icon: Network },
   { title: 'Nodes', url: '/nodes', icon: Server },
   { title: 'Flows', url: '/flows', icon: GitBranch },
   { title: 'Statistics', url: '/statistics', icon: BarChart3 },
+];
+
+const securityItems = [
+  { title: 'Anomalies', url: '/anomalies', icon: ShieldAlert },
+  { title: 'DDoS Analysis', url: '/ddos', icon: Flame },
+];
+
+const systemItems = [
   { title: 'Settings', url: '/settings', icon: Settings },
 ];
 
 export function AppSidebar() {
   const location = useLocation();
+
+  const renderMenuItems = (items: typeof managementItems) => {
+    return items.map((item) => {
+      const isActive = item.url === '/'
+        ? location.pathname === '/'
+        : location.pathname.startsWith(item.url);
+      return (
+        <SidebarMenuItem key={item.title}>
+          <SidebarMenuButton
+            render={<Link to={item.url} />}
+            isActive={isActive}
+            tooltip={item.title}
+          >
+            <item.icon className="size-4" />
+            <span>{item.title}</span>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+      );
+    });
+  };
 
   return (
     <Sidebar collapsible="icon" variant="sidebar">
@@ -56,27 +86,32 @@ export function AppSidebar() {
       </SidebarHeader>
 
       <SidebarContent>
+        {/* Management Group */}
         <SidebarGroup>
           <SidebarGroupLabel>Management</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {navItems.map((item) => {
-                const isActive = item.url === '/'
-                  ? location.pathname === '/'
-                  : location.pathname.startsWith(item.url);
-                return (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton
-                      render={<Link to={item.url} />}
-                      isActive={isActive}
-                      tooltip={item.title}
-                    >
-                      <item.icon className="size-4" />
-                      <span>{item.title}</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                );
-              })}
+              {renderMenuItems(managementItems)}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        {/* Security Group */}
+        <SidebarGroup>
+          <SidebarGroupLabel>Security</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {renderMenuItems(securityItems)}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        {/* System/Settings Group */}
+        <SidebarGroup>
+          <SidebarGroupLabel>System</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {renderMenuItems(systemItems)}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

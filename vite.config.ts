@@ -17,7 +17,7 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       port: 5374,
-      https: true,
+      https: true as any,
       proxy: {
         "/rests": {
           target: odlApiUrl,
